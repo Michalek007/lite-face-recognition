@@ -8,17 +8,19 @@ from torchvision import datasets
 
 class Dataset:
     @staticmethod
-    def load_datasets(validation_split: float = 0.1, transform_to_tensors: bool = True):
+    def load_datasets(validation_split: float = 0.1, transform_to_tensors: bool = True, data_dir: str = None):
+        if data_dir is None:
+            data_dir = "../data"
         transform = ToTensor() if transform_to_tensors else None
         train_dataset = datasets.LFWPairs(
-            root="../data",
+            root=data_dir,
             split="train",
             download=False,
             image_set='deepfunneled',
             transform=transform
         )
         test_data = datasets.LFWPairs(
-            root="../data",
+            root=data_dir,
             split="test",
             download=False,
             image_set='deepfunneled',

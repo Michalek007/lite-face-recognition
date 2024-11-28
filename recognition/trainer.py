@@ -8,26 +8,38 @@ from dataset import Dataset
 
 
 class Trainer:
-    def __init__(self, model: nn.Module, optimizer, loss_fn, epochs: int, batch_size: int, learning_rate: float, filename: str, **config):
+    def __init__(self, model: nn.Module, optimizer, loss_fn, epochs: int, batch_size: int, learning_rate: float, model_name: str, **config):
         self.model = model
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.epochs = epochs
         self.batch_size = batch_size
         self.learning_rate = learning_rate
-        self.filename = f'{filename}.pt'
         self.cp_dir_number = None
         self.config = config
 
-        self.train_data, self.val_data, self.test_data = Dataset.load_datasets(transform_to_tensors=True)
+        self.train_data, self.val_data, self.test_data = Dataset.load_datasets(transform_to_tensors=True, data_dir=config.get('data_dir'))
         self.train_dataloader, self.val_dataloader, self.test_dataloader = Dataset.get_dataloaders(self.train_data, self.val_data, self.test_data, batch_size=self.batch_size)
+
+        self.file = f'{model_name}.pt'
+        self.best_model_file = f'best_model_{self.file}'
+        self.cp_file = f'cp_{self.file}'
+        self.cp_optimizer_file = f'cp_optimizer_{self.file}'
+        self.results_file = f'{model_name}_results.txt'
+        self.logs_file = f'{model_name}_epochs_results.log'
+        self.onnx_file = f'{model_name}.onnx'
+
+        self.results_dir = Path(f'results/{model_name}/')
+        if not self.results_dir.exists():
+            self.results_dir.mkdir()
+        self.file, self.best_model_file, self.cp_file, self.cp_optimizer_file, self.results_file, self.logs_file, self.onnx_file \
+            = map(lambda arg: str(Path.joinpath(self.results_dir, arg)), (self.file, self.best_model_file, self.cp_file, self.cp_optimizer_file, self.results_file, self.logs_file, self.onnx_file))
 
         self.logging_enable = True
         if self.logging_enable:
-            logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', filename='epochs_results.log',
-                                level=logging.INFO)
+            logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', filename=self.logs_file, level=logging.INFO)
 
-        self.best_model_filename = f'best_model_{self.filename}'
+        assert self.config.get('margin') is not None
 
     def run(self, load_from_checkpoint: bool = False, save_to_checkpoint: bool = True, save_results: bool = True):
 
@@ -49,7 +61,7 @@ class Trainer:
 
             if save_to_checkpoint:
                 if accuracy > last_accuracy:
-                    torch.save(self.model.state_dict(), f'best_model_{self.filename}')
+                    torch.save(self.model.state_dict(), self.best_model_file)
                     last_accuracy = accuracy
                 self.save_checkpoint()
 
@@ -98,7 +110,7 @@ class Trainer:
             for batch, (img1, img2, target) in enumerate(self.val_dataloader):
                 img1_pred, img2_pred = self.model(img1), self.model(img2)
                 distance = cosine_similarity(img1_pred, img2_pred)
-                xor = torch.logical_xor(distance < 0.5, target)
+                xor = torch.logical_xor(distance < self.config['margin'], target)
                 correct += xor.sum().item()
 
                 target[target == 0] = -1
@@ -122,7 +134,7 @@ class Trainer:
             for batch, (img1, img2, target) in enumerate(self.test_dataloader):
                 img1_pred, img2_pred = self.model(img1), self.model(img2)
                 distance = cosine_similarity(img1_pred, img2_pred)
-                xor = torch.logical_xor(distance < 0.6, target)
+                xor = torch.logical_xor(distance < self.config['margin'], target)
                 correct += xor.sum().item()
                 print(f"accuracy: {(100*correct/((batch+1)*self.batch_size)):>0.1f}% [{batch * self.batch_size + len(img1):>5d}/{dataset_len:>5d}]")
 
@@ -131,9 +143,9 @@ class Trainer:
         return correct
 
     def save_checkpoint(self):
-        torch.save(self.model.state_dict(), f'cp_{self.filename}')
-        torch.save(self.optimizer.state_dict(), f'cp_optimizer_{self.filename}')
-        path = Path(f'models')
+        torch.save(self.model.state_dict(), self.cp_file)
+        torch.save(self.optimizer.state_dict(), self.cp_optimizer_file)
+        path = self.results_dir.joinpath('models')
         if not path.exists():
             path.mkdir()
         dirs = os.listdir(path)
@@ -147,23 +159,27 @@ class Trainer:
                 self.cp_dir_number = str(dir_number)
             path = path.joinpath(self.cp_dir_number)
             path.mkdir(exist_ok=True)
-        shutil.copy(f'cp_{self.filename}', path)
-        shutil.copy(f'cp_optimizer_{self.filename}', path)
-        shutil.copy(f'best_model_{self.filename}', path)
+        shutil.copy(self.cp_file, path)
+        shutil.copy(self.cp_optimizer_file, path)
+        shutil.copy(self.best_model_file, path)
 
     def load_checkpoint(self):
-        self.model.load_state_dict(torch.load(f'cp_{self.filename}', weights_only=True))
-        self.optimizer.load_state_dict(torch.load(f'cp_optimizer_{self.filename}'))
+        self.model.load_state_dict(torch.load(self.cp_file, weights_only=True))
+        self.optimizer.load_state_dict(torch.load(self.cp_optimizer_file))
 
     def load_model(self, best_model: bool = True):
-        model_filename = self.best_model_filename if best_model else self.filename
-        self.model.load_state_dict(torch.load(model_filename, weights_only=True))
+        model_file = self.best_model_file if best_model else self.file
+        self.model.load_state_dict(torch.load(model_file, weights_only=True))
 
     def save_model(self):
-        torch.save(self.model.state_dict(), self.filename)
+        torch.save(self.model.state_dict(), self.file)
+
+    def save_model_to_onnx(self):
+        torch_input = torch.randn(1, self.model.input_channels, self.model.input_height, self.model.input_width)
+        torch.onnx.export(self.model, torch_input, self.onnx_file)
 
     def save_results(self, accuracy: float, average_train_loss: float, average_test_loss: float):
-        with open('results.txt', 'a') as f:
+        with open(self.results_file, 'a') as f:
             f.write(f'lr:{self.learning_rate};batch_size:{self.batch_size};epochs:{self.epochs}; {self.model.name};dir_number:{self.cp_dir_number}\n')
             f.write(str(self.model))
             f.write(f' Accuracy: {(100 * accuracy):>0.1f}%; Average train loss: {average_train_loss:>0.8f}; Average test loss: {average_test_loss:>0.8f}')
