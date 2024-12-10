@@ -38,8 +38,8 @@ def train_lwf(config, data_dir=None):
             net = nn.DataParallel(net)
     net.to(device)
 
-    criterion = nn.CosineEmbeddingLoss(margin=config["m"])
-    optimizer = optim.SGD(net.parameters(), lr=config["lr"], momentum=0.9)
+    criterion = nn.CosineEmbeddingLoss(margin=config["m"], size_average=False, reduction="sum")
+    optimizer = optim.SGD(net.parameters(), lr=config["lr"], momentum=0.9, weight_decay=1e-4)
 
     checkpoint = get_checkpoint()
     if checkpoint:
@@ -83,7 +83,7 @@ def train_lwf(config, data_dir=None):
             if i % 2000 == 1999:  # print every 2000 mini-batches
                 print(
                     "[%d, %5d] loss: %.3f"
-                    % (epoch + 1, i + 1, running_loss / epoch_steps)
+                    % (epoch + 1, i + 1, running_loss / len(trainloader.dataset))
                 )
                 running_loss = 0.0
 
@@ -118,7 +118,7 @@ def train_lwf(config, data_dir=None):
 
             checkpoint = Checkpoint.from_directory(checkpoint_dir)
             train.report(
-                {"loss": val_loss / val_steps, "accuracy": correct / total},
+                {"loss": val_loss / len(valloader.dataset), "accuracy": correct / total},
                 checkpoint=checkpoint,
             )
 
@@ -153,12 +153,15 @@ def main(num_samples=10, max_num_epochs=10, gpus_per_trial=2):
     data_dir = os.path.abspath("../data_mtcnn")
     load_data(data_dir)
     config = {
-        "c2": tune.choice([2 ** i for i in range(2, 7)]),
-        "c3": tune.choice([2 ** i for i in range(2, 7)]),
-        "f2": tune.choice([2**i for i in range(2, 7)]),
-        "m": tune.choice([0.3, 0.4, 0.5, 0.6, 0.7, 0.8]),
-        "lr": tune.loguniform(1e-2, 1e-1),
-        "b": tune.choice([4, 8, 16])
+        'c1': 16, 'c2': 32, 'c3': 64, 'c4': 128, 'f1': 512, 'f2': 128,
+        # "c2": tune.choice([2 ** i for i in range(2, 7)]),
+        # "c3": tune.choice([2 ** i for i in range(2, 7)]),
+        # "f2": tune.choice([2**i for i in range(2, 7)]),
+        # "m": tune.choice([0.3, 0.4, 0.5, 0.6, 0.7, 0.8]),
+        'm': 0.8,
+        "lr": tune.loguniform(1e-3, 1e-1),
+        # "b": tune.choice([4, 8, 16]),
+        "b": 16
     }
     scheduler = ASHAScheduler(
         metric="loss",
@@ -180,7 +183,10 @@ def main(num_samples=10, max_num_epochs=10, gpus_per_trial=2):
     print(f"Best trial final validation loss: {best_trial.last_result['loss']}")
     print(f"Best trial final validation accuracy: {best_trial.last_result['accuracy']}")
 
-    best_trained_model = Model.get(MODEL_NAME, IN_CHANNELS, (IMAGE_H, IMAGE_W), c2=best_trial.config["c2"], c3=best_trial.config["c3"], f2=best_trial.config["f2"])
+    best_trained_model = Model.get(MODEL_NAME, IN_CHANNELS, (IMAGE_H, IMAGE_W),
+                                   c1=best_trial.config["c1"], c2=best_trial.config["c2"],
+                                   c3=best_trial.config["c3"], c4=best_trial.config["c4"],
+                                   f1=best_trial.config["f1"], f2=best_trial.config["f2"])
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda:0"

@@ -1,10 +1,11 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from utils.nn_utils import get_conv_output_size, get_max_pool_output_size
 
 
 class LiteFace100(nn.Module):
-    def __init__(self, in_channels: int, image_size: tuple, c1: int = 64, c2: int = 64, c3: int = 64, c4: int = 64, f2: int = 32):
+    def __init__(self, in_channels: int, image_size: tuple, c1: int = 16, c2: int = 32, c3: int = 64, c4: int = 128, f1: int = 512, f2: int = 128):
         super().__init__()
 
         # expected image channels
@@ -23,22 +24,22 @@ class LiteFace100(nn.Module):
             ("conv", c1, 3, 2, 3),
             max_pool_,
             ("conv", c2, 3, 1, 1),
-            ("conv", c2//4, 1, 1, 0),
+            # ("conv", c2//4, 1, 1, 0),
             max_pool_,
             ("conv", c3, 3, 1, 1),
-            ("conv", c3//4, 1, 1, 0),
+            # ("conv", c3//4, 1, 1, 0),
             max_pool_,
             # ("conv", c4, 3, 1, 1),
             # ("conv", c4//4, 1, 1, 0),
             # max_pool_,
-            ("conv", 256, 3, 1, 1),
+            ("conv", c4, 3, 1, 1),  # 256
             adaptive_avg_pool_,
             avg_pool_
         )
 
         self.fc_layers = (
-            ("linear", 256),
-            # ("dropout", 0.0),
+            ("linear", f1),
+            # ("dropout", 0.5),
             ("leaky_relu", 0.1),
             ("linear", f2)
         )
@@ -65,7 +66,6 @@ class LiteFace100(nn.Module):
                 flatten_input, input_size = get_max_pool_output_size(in_channels, input_size, layer[1], layer[2], layer[3])
 
             elif layer[0] == "adaptive_avg_pool":
-                print(input_size)
                 self.layers.append(nn.AdaptiveAvgPool2d(layer[1]))
                 flatten_input, input_size = in_channels * layer[1][0] * layer[1][1], layer[1]
 
@@ -90,7 +90,8 @@ class LiteFace100(nn.Module):
 
     def forward(self, x):
         x = self.sequential(x)
-        return x
+        return F.normalize(x)
+        # return x
 
 
 if __name__ == '__main__':

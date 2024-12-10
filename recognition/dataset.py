@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets
-from torchvision.transforms import ToTensor
+from torchvision.transforms import ToTensor, Compose, Normalize
 from torchvision import datasets
 
 
@@ -11,7 +11,7 @@ class Dataset:
     def load_datasets(validation_split: float = 0.1, transform_to_tensors: bool = True, data_dir: str = None):
         if data_dir is None:
             data_dir = "../data"
-        transform = ToTensor() if transform_to_tensors else None
+        transform = Compose([ToTensor(), Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])]) if transform_to_tensors else None
         train_dataset = datasets.LFWPairs(
             root=data_dir,
             split="train",

@@ -8,9 +8,10 @@ from dataset import Dataset
 
 
 class Trainer:
-    def __init__(self, model: nn.Module, optimizer, loss_fn, epochs: int, batch_size: int, learning_rate: float, model_name: str, **config):
+    def __init__(self, model: nn.Module, optimizer, scheduler, loss_fn, epochs: int, batch_size: int, learning_rate: float, model_name: str, **config):
         self.model = model
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.loss_fn = loss_fn
         self.epochs = epochs
         self.batch_size = batch_size
@@ -28,12 +29,15 @@ class Trainer:
         self.results_file = f'{model_name}_results.txt'
         self.logs_file = f'{model_name}_epochs_results.log'
         self.onnx_file = f'{model_name}.onnx'
+        self.cp_scheduler_file = f'cp_scheduler_{self.file}'
+
+        files = (self.file, self.best_model_file, self.cp_file, self.cp_optimizer_file, self.results_file, self.logs_file, self.onnx_file, self.cp_scheduler_file)
 
         self.results_dir = Path(f'results/{model_name}/')
         if not self.results_dir.exists():
             self.results_dir.mkdir()
-        self.file, self.best_model_file, self.cp_file, self.cp_optimizer_file, self.results_file, self.logs_file, self.onnx_file \
-            = map(lambda arg: str(Path.joinpath(self.results_dir, arg)), (self.file, self.best_model_file, self.cp_file, self.cp_optimizer_file, self.results_file, self.logs_file, self.onnx_file))
+        self.file, self.best_model_file, self.cp_file, self.cp_optimizer_file, self.results_file, self.logs_file, self.onnx_file, self.cp_scheduler_file\
+            = map(lambda arg: str(Path.joinpath(self.results_dir, arg)), files)
 
         self.logging_enable = True
         if self.logging_enable:
@@ -46,7 +50,7 @@ class Trainer:
         if load_from_checkpoint:
             self.load_checkpoint()
 
-        last_accuracy = 0
+        best_loss = 0
         accuracy, average_train_loss, average_test_loss = 0.0, 0.0, 0.0
         if self.logging_enable:
             logging.info(f"Training of model: f'lr:{self.learning_rate};batch_size:{self.batch_size};epochs:{self.epochs}; {self.model.name}'")
@@ -56,13 +60,17 @@ class Trainer:
             average_train_loss = self.train_loop()
             accuracy, average_test_loss = self.validation_loop()
 
+            # Learning rate adjustment
+            if self.scheduler:
+                self.scheduler.step()
+
             if self.logging_enable:
                 logging.info(f"Accuracy: {(100 * accuracy):>0.1f}%; Average train loss: {average_train_loss:>0.8f}; Average test loss: {average_test_loss:>0.8f} after {t+1} epoch. ")
 
             if save_to_checkpoint:
-                if accuracy > last_accuracy:
+                if average_test_loss > best_loss:
                     torch.save(self.model.state_dict(), self.best_model_file)
-                    last_accuracy = accuracy
+                    best_loss = average_test_loss
                 self.save_checkpoint()
 
         accuracy = self.test_loop()
@@ -80,8 +88,7 @@ class Trainer:
 
         for batch, (img1, img2, target) in enumerate(self.train_dataloader):
             # Compute prediction and loss
-            img1_pred = self.model(img1)
-            img2_pred = self.model(img2)
+            img1_pred, img2_pred = self.model(img1), self.model(img2)
             target[target == 0] = -1
             loss = self.loss_fn(img1_pred, img2_pred, target)
 
@@ -95,7 +102,7 @@ class Trainer:
                 loss, current = loss.item(), batch * self.batch_size + len(img1)
                 print(f"loss: {loss:>8f}  [{current:>5d}/{dataset_len:>5d}]")
 
-        running_loss /= batches_count
+        running_loss /= dataset_len
         print(f"Train loss: {running_loss:>8f}")
         return running_loss
 
@@ -110,7 +117,9 @@ class Trainer:
             for batch, (img1, img2, target) in enumerate(self.val_dataloader):
                 img1_pred, img2_pred = self.model(img1), self.model(img2)
                 distance = cosine_similarity(img1_pred, img2_pred)
-                xor = torch.logical_xor(distance < self.config['margin'], target)
+                print(distance)
+                print(target)
+                xor = torch.logical_xor(distance < 0.9, target)
                 correct += xor.sum().item()
 
                 target[target == 0] = -1
@@ -118,7 +127,7 @@ class Trainer:
 
                 print(f"accuracy: {(100*correct/((batch+1)*self.batch_size)):>0.1f}% [{batch * self.batch_size + len(img1):>5d}/{dataset_len:>5d}]")
 
-        test_loss /= batches_count
+        test_loss /= dataset_len
         correct /= dataset_len
         print(f"Validation Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
         return correct, test_loss
@@ -134,7 +143,9 @@ class Trainer:
             for batch, (img1, img2, target) in enumerate(self.test_dataloader):
                 img1_pred, img2_pred = self.model(img1), self.model(img2)
                 distance = cosine_similarity(img1_pred, img2_pred)
-                xor = torch.logical_xor(distance < self.config['margin'], target)
+                print(distance)
+                print(target)
+                xor = torch.logical_xor(distance < 0.95, target)
                 correct += xor.sum().item()
                 print(f"accuracy: {(100*correct/((batch+1)*self.batch_size)):>0.1f}% [{batch * self.batch_size + len(img1):>5d}/{dataset_len:>5d}]")
 
@@ -142,9 +153,23 @@ class Trainer:
         print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%\n")
         return correct
 
+    # def metric(self, img1_pred, img2_pred, target):
+    #     cosine_similarity = nn.CosineSimilarity()
+    #     distance = cosine_similarity(img1_pred, img2_pred)
+    #     xor = torch.logical_xor(distance < self.config['margin'], target)
+    #     correct = xor.sum().item()
+    #     return correct
+    #
+    # def loss(self, img1_pred, img2_pred, target):
+    #     target[target == 0] = -1
+    #     loss = self.loss_fn(img1_pred, img2_pred, target).item()
+    #     return loss
+
     def save_checkpoint(self):
         torch.save(self.model.state_dict(), self.cp_file)
         torch.save(self.optimizer.state_dict(), self.cp_optimizer_file)
+        if self.scheduler:
+            torch.save(self.scheduler.state_dict(), self.cp_scheduler_file)
         path = self.results_dir.joinpath('models')
         if not path.exists():
             path.mkdir()
@@ -162,10 +187,14 @@ class Trainer:
         shutil.copy(self.cp_file, path)
         shutil.copy(self.cp_optimizer_file, path)
         shutil.copy(self.best_model_file, path)
+        if self.scheduler:
+            shutil.copy(self.cp_scheduler_file, path)
 
     def load_checkpoint(self):
         self.model.load_state_dict(torch.load(self.cp_file, weights_only=True))
         self.optimizer.load_state_dict(torch.load(self.cp_optimizer_file))
+        if self.scheduler:
+            self.scheduler.load_state_dict(torch.load(self.cp_scheduler_file))
 
     def load_model(self, best_model: bool = True):
         model_file = self.best_model_file if best_model else self.file
