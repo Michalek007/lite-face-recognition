@@ -44,6 +44,7 @@ class Trainer:
             logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', filename=self.logs_file, level=logging.INFO)
 
         assert self.config.get('margin') is not None
+        assert self.config.get('diff_loss_weight') is not None
 
     def run(self, load_from_checkpoint: bool = False, save_to_checkpoint: bool = True, save_results: bool = True):
 
@@ -68,7 +69,7 @@ class Trainer:
                 logging.info(f"Accuracy: {(100 * accuracy):>0.1f}%; Average train loss: {average_train_loss:>0.8f}; Average test loss: {average_test_loss:>0.8f} after {t+1} epoch. ")
 
             if save_to_checkpoint:
-                if average_test_loss > best_loss:
+                if average_test_loss < best_loss:
                     torch.save(self.model.state_dict(), self.best_model_file)
                     best_loss = average_test_loss
                 self.save_checkpoint()
@@ -91,6 +92,8 @@ class Trainer:
             img1_pred, img2_pred = self.model(img1), self.model(img2)
             target[target == 0] = -1
             loss = self.loss_fn(img1_pred, img2_pred, target)
+            loss[target==-1] *= self.config.get('diff_loss_weight')
+            loss = loss.sum()
 
             # Backpropagation
             loss.backward()
@@ -123,7 +126,10 @@ class Trainer:
                 correct += xor.sum().item()
 
                 target[target == 0] = -1
-                test_loss += self.loss_fn(img1_pred, img2_pred, target).item()
+                # test_loss += self.loss_fn(img1_pred, img2_pred, target).item()
+                loss = self.loss_fn(img1_pred, img2_pred, target)
+                loss[target == -1] *= self.config.get('diff_loss_weight')
+                test_loss += loss.sum().item()
 
                 print(f"accuracy: {(100*correct/((batch+1)*self.batch_size)):>0.1f}% [{batch * self.batch_size + len(img1):>5d}/{dataset_len:>5d}]")
 
@@ -132,20 +138,23 @@ class Trainer:
         print(f"Validation Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
         return correct, test_loss
 
-    def test_loop(self):
+    def test_loop(self, **kwargs):
         self.model.eval()
         dataset_len = len(self.test_dataloader.dataset)
         batches_count = len(self.test_dataloader)
         correct = 0
         cosine_similarity = nn.CosineSimilarity()
 
+        margin = kwargs.get("margin")
+        if not margin:
+            margin = self.config.get("margin")
         with torch.no_grad():
             for batch, (img1, img2, target) in enumerate(self.test_dataloader):
                 img1_pred, img2_pred = self.model(img1), self.model(img2)
                 distance = cosine_similarity(img1_pred, img2_pred)
                 print(distance)
                 print(target)
-                xor = torch.logical_xor(distance < 0.95, target)
+                xor = torch.logical_xor(distance < margin, target)
                 correct += xor.sum().item()
                 print(f"accuracy: {(100*correct/((batch+1)*self.batch_size)):>0.1f}% [{batch * self.batch_size + len(img1):>5d}/{dataset_len:>5d}]")
 

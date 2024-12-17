@@ -3,9 +3,8 @@ import numpy as np
 import torch.nn as nn
 from torchvision.ops.boxes import batched_nms, box_iou
 
-from pnet import PNet
-from rnet import RNet
-from mtcnn_utils import *
+from .models import PNet, RNet
+from .mtcnn_utils import *
 
 
 class LiteMTCNN(nn.Module):
@@ -20,6 +19,8 @@ class LiteMTCNN(nn.Module):
         self.iou_threshold_2 = 0.1
         self.threshold_pnet = 0.97
         self.threshold_rnet = 0.97
+        self.image_size = (100, 100)
+        self.boxes = None
 
     def detect(self, image: Image):
         imgs = np.stack([np.uint8(image)])
@@ -115,4 +116,11 @@ class LiteMTCNN(nn.Module):
             return boxes
 
     def forward(self, image: Image):
-        boxes = self.detect(image)
+        self.boxes = self.detect(image)
+        if self.boxes is None:
+            return []
+        images = []
+        for x, y, x2, y2, prob in self.boxes:
+            box = (x.item(), y.item(), x2.item(), y2.item())
+            images.append(image.crop(box).copy().resize((self.image_size[0], self.image_size[1]), Image.BILINEAR))
+        return images

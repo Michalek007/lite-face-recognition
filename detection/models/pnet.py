@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-import numpy as np
 import os
 
 
@@ -28,7 +27,7 @@ class PNet(nn.Module):
         self.training = False
 
         if pretrained:
-            state_dict_path = os.path.join(os.path.dirname(__file__), 'models/pnet.pt')
+            state_dict_path = os.path.join(os.path.dirname(__file__), 'data/pnet.pt')
             state_dict = torch.load(state_dict_path)
             self.load_state_dict(state_dict)
 

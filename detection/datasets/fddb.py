@@ -39,24 +39,27 @@ class FDDBDataset(Dataset):
         image = self._read_image(img_path)
         boxes = self.bboxes[idx]
 
-        if not isinstance(self.transform, ToTensor):
-            self.scale = None
         img_h = image.height
         img_w = image.width
+        
+        if self.scale and not isinstance(self.transform, ToTensor):
+            image = image.resize((self.scale[1], self.scale[1]))
 
         if self.transform:
             image = self.transform(image)
 
-            if self.scale:
-                image = interpolate(image.unsqueeze(0), self.scale).squeeze()
-                scale_y = self.scale[0] / img_h
-                scale_x = self.scale[1] / img_w
-                scaled_boxes = []
-                for x, y, x2, y2 in boxes:
-                    scaled_boxes.append(
-                        (x*scale_x, y*scale_y, x2*scale_x, y2*scale_y)
-                    )
-                boxes = scaled_boxes
+            if self.scale and isinstance(self.transform, ToTensor):
+                image = interpolate(image.unsqueeze(0), self.scale, mode='area').squeeze()
+
+        if self.scale:
+            scale_y = self.scale[0] / img_h
+            scale_x = self.scale[1] / img_w
+            scaled_boxes = []
+            for x, y, x2, y2 in boxes:
+                scaled_boxes.append(
+                    (x*scale_x, y*scale_y, x2*scale_x, y2*scale_y)
+                )
+            boxes = scaled_boxes
 
         if self.target_transform:
             boxes = self.target_transform(boxes)
