@@ -33,3 +33,16 @@ def get_iou_accuracy(true_boxes: List[torch.Tensor], pred_boxes: List[torch.Tens
     true_positive, false_positive, true_negative, false_negative = get_iou_confusion_matrix(true_boxes, pred_boxes, indexes, iou_threshold)
     accuracy = (true_positive + true_negative) / (true_positive + false_positive + true_negative + false_negative)
     return accuracy
+
+
+def get_iou_metrics(true_boxes: List[torch.Tensor], pred_boxes: List[torch.Tensor], indexes: List[int],  iou_threshold: float):
+    """
+    Returns:
+        accuracy, recall, precision, f1_score
+    """
+    true_positive, false_positive, true_negative, false_negative = get_iou_confusion_matrix(true_boxes, pred_boxes, indexes, iou_threshold)
+    accuracy = (true_positive + true_negative) / (true_positive + false_positive + true_negative + false_negative)
+    recall = true_positive / (true_positive+false_negative)
+    precision = true_positive / (true_positive+false_positive)
+    f1_score = 2*precision*recall/(precision+recall)
+    return accuracy, recall, precision, f1_score
