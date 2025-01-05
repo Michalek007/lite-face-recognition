@@ -6,3 +6,4 @@ __pycache__/
 /.idea/
 /dev/
 /data_camera/
+/data_camera_aligned/
