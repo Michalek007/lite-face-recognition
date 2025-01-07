@@ -120,7 +120,14 @@ class LiteMTCNN(nn.Module):
         if self.boxes is None:
             return []
         images = []
+        indexes = []
+        i = 0
         for x, y, x2, y2, prob in self.boxes:
             box = (x.item(), y.item(), x2.item(), y2.item())
+            indexes.append((i, box[0]))
             images.append(image.crop(box).copy().resize((self.image_size[0], self.image_size[1]), Image.BILINEAR))
+            i += 1
+        if i > 1:
+            indexes.sort(key=lambda arg: arg[1])
+            images = [images[idx] for idx, _ in indexes]
         return images

@@ -19,7 +19,7 @@ class FaceRecognition:
         self.transform = Compose([ToTensor(), Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])])
         self.cosine_similarity = nn.CosineSimilarity(dim=0)
         self.margin = 0.97
-        self.similarity_split = 0.5
+        self.similarity_split = 0.8
         self.similarity_number = 4
 
     def add_known_person(self, files: list, name: str, is_aligned: bool = False):
@@ -80,19 +80,27 @@ class FaceRecognition:
                     recognized_count = 0
                     known_face_embeddings = self.known_embeddings[known_embedding_index]
                     recognized_max_count = len(known_face_embeddings)
+                    distance_mean = 0
                     for known_embedding in known_face_embeddings:
-                        if self.is_recognized(known_embedding, embedding):
+                        distance = self.get_distance(known_embedding, embedding)
+                        distance_mean += distance
+                        if self.is_recognized(distance):
                             recognized_count += 1
-                    threshold = self.similarity_number if self.similarity_number else int(recognized_max_count*self.similarity_split)
-                    print(recognized_count)
+                    threshold = self.similarity_number if self.similarity_number <= recognized_max_count else int(recognized_max_count*self.similarity_split)
                     if recognized_count >= threshold:
                         recognized_names[j].append(name)
                     else:
                         recognized_names[j].append('unknown')
+                    distance_mean /= recognized_max_count
+                    print(recognized_count)
+                    print(distance_mean)
         return recognized_names
 
-    def is_recognized(self, known_embedding: torch.Tensor, target_embedding: torch.Tensor):
+    def get_distance(self, known_embedding: torch.Tensor, target_embedding: torch.Tensor):
         distance = self.cosine_similarity(known_embedding, target_embedding)
+        return distance
+
+    def is_recognized(self, distance):
         return distance >= self.margin
 
     def get_embedding(self, image: Image):
@@ -103,9 +111,9 @@ class FaceRecognition:
         images = []
         for file in files:
             image = Image.open(file)
-            if image.width != 100 or image.height != 100:
-                image = image.resize((100, 100))
             if is_aligned:
+                if image.width != 100 or image.height != 100:
+                    image = image.resize((100, 100))
                 images.append([image])
                 continue
             aligned = self.lite_mtcnn(image)
