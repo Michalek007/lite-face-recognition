@@ -3,6 +3,7 @@ import torch.nn as nn
 from PIL import Image
 from pathlib import Path
 import os
+import math
 from torchvision.transforms import ToTensor, Compose, Normalize
 from typing import List
 from recognition.model import Model
@@ -86,7 +87,7 @@ class FaceRecognition:
                         distance_mean += distance
                         if self.is_recognized(distance):
                             recognized_count += 1
-                    threshold = self.similarity_number if self.similarity_number <= recognized_max_count else int(recognized_max_count*self.similarity_split)
+                    threshold = self.similarity_number if self.similarity_number <= recognized_max_count else math.ceil(recognized_max_count*self.similarity_split)
                     if recognized_count >= threshold:
                         recognized_names[j].append(name)
                     else:
